@@ -1,0 +1,55 @@
+## Create database 
+
+```{r setup, include=FALSE, cache=FALSE}
+#Set root directory to R project root
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+Below are the instructions and code for getting data from wildtrax that was developed by Elly Knight. The original rScripts are available [here](https://github.com/baynelab-research/aru-data-processing-code).
+
+*See the wildRtrax article here for more details on authentication:* <https://abbiodiversity.github.io/wildRtrax/articles/authenticating-into-wt.html>
+
+1.  **Load packages**
+
+```{r eval=FALSE}
+#install.packages("remotes")
+#remotes::install_github("ABbiodiversity/wildRtrax")
+library(wildRtrax)
+library(tidyverse)
+```
+
+
+2.  **Login to WildTrax**
+
+NOTE: If you have not done this yet, first, open a blank R document and add the following text to it:  
+```{r eval=FALSE}
+ Sys.setenv(WT_USERNAME = 'your wildtrax username', WT_PASSWORD = 'your wildtrax password')  
+```
+
+Then save the file to "1_scripts/functions/login.R", and ensure that it will not be pushed to github by adding the file path (without the quotes) to your .gitignore file (in the main project directory)
+
+```{r eval=FALSE}
+config <- "login.R"
+source(config)
+wt_auth()
+```
+
+3.  **Get list of projects from WildTrax**
+
+```{r eval=FALSE}
+projects <- wt_get_download_summary(sensor_id = 'ARU')
+```
+
+4.  **Download RUGR dataset summary report**
+
+```{r eval=FALSE}
+dat.rugr <- wt_download_report(project_id = 1321, sensor_id = 'ARU', weather_cols = T, report = "summary")
+```
+
+5.  **Download RUGR task report to check coordinate buffering**
+
+```{r eval=FALSE}
+task.rugr <- wt_download_report(project_id = 1321, sensor_id = 'ARU', report = "task")
+table(task.rugr$buffer)
+```
+
