@@ -1,0 +1,191 @@
+--- 
+bibliography: C:/Users/crosby/Documents/zotero-library-json.json
+csl: common/landscape-ecology.csl
+---
+
+
+Simulate occpancy and detection data 
+
+```{r setup, include=FALSE, cache=FALSE}
+#Set root directory to R project root
+knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+
+'frequency' = the regularity at which a drumming male ruffed grouse may be heard (maximum frequency = daily)  
+'rate' = interval between drums for an individual grouse  
+'intensity' = the percentage of grouse participating in drumming activity on a given morning or evening  
+
+# Density:  
+
+* @lovallo2000 reported 1.6--12.5 males/km^2^ on managed forest, and 1.7--7.6 on unmanaged forest in Pennsylvania, USA from 1976--1997.  
+
+* @theberge1982 reported 10.2--11.8 ha/male in an area comprised mainly of white spruce (*Picea glauca*) and balsam fir (*Abies balsamia*) with a minor aspen (*Populus spp.*) component, and 10.3--17.6 ha/male in an area comprised of sugar maple (*Acer saccharum*) uplands and northern white cedar (*Thuja occidentalis*) lowlands, with no aspen component, in Algonquin Provincial Park, Ontario, Canada from 1971--1980. This translates to 8.9--9.8 males/km^2^ and 5.6--9.7 males/km^2^, respectively.
+
+* @gullion1966 reported 1.7--5.1 males/km^2^ on the Cloquet Forest in Minnesota, USA from 1959--1962.  
+
+* @rusch1971 reported densities of 3.5 (1966--67)--6 (1968) males/km^2^ near Rochester, Alberta, Canada.  
+
+# Home range size    
+
+* @theberge1982 reported almost all movements were limited to within 50m of the drumming log. This translates into a home range size of ~0.8ha 
+
+* @archibald1975  reported drumming season home range sizes of 2.33--3.16ha during the drumming period for grouse in a natural area north of Minneapolis, Minnesota, USA. 
+
+
+
+Mine the data to find: 
+
+* Peak period of drumming activity daily and seasonally. 
+  - Timing of snow melt has little influence on peak seasonal drumming activity, but does affect intensity.  
+  - Winter severity has a big affect on intensity.  
+
+* Distribution of number of surveys among all sites.  
+
+
+
+To make the simulations applicable to our data, we need to use a similar distribution of number of surveys per site. Then, get time of day and day of year distributions. Surveys are pretty much uniformly distributed between April 20 (day 110) and May 30 (day 150). 
+```{r, eval = FALSE} 
+
+# Get the detection matrix from the unmarked occupancy dataframe
+y <- occ.data@y
+
+library(EnvStats)
+surv.dist <- sapply(1:nrow(y), function(x) length(which(!is.na(y[x, ]))))
+
+gam <- egamma(surv.dist) # The gamma distribution parameters (shape and scale)
+
+hist(visits$doy)
+hist(visits$hr)
+
+
+hour = as.numeric(hour(dat$recording_date) + minute(dat$recording_date)/60)
+
+
+
+night <- visits %>% filter(hr <= 2) 
+day <- data.frame(visits %>% filter(hr > 2)) 
+
+
+naive <- rowSums(occ.data@y, na.rm = TRUE)
+naive[naive > 0] <- 1 
+
+dat1 <- dat[which(hour > 2), ]
+
+occ.data <- wt_format_occupancy(data = dat1, species = "RUGR")
+
+
+```
+
+
+
+
+```{r, eval = FALSE}
+
+nsite <- 1000 
+
+
+```
+
+
+Now we need to simulate occupancy, density, and drumming behaviour at each site throughout the season. 
+
+```{r, eval=FALSE} 
+
+psi <- 0.5
+
+lam <- 5
+
+max.nsurv <- 85
+
+mean.pct.active <- mean(c(29,49,31,30))
+sd.pct.active <-  mean(11,18,20,14)
+
+rugr_data_sim <- function(nsite, psi, lam, gam, mean.pct.active, sd.pct.active, max.nsurv){
+
+  occ <- rbinom(nsite, 1, psi)
+  
+  abund <- rpois(nsite, lam)*occ
+  
+  # Use the gamma parameters to simulate number of surveys at each site, capping them at 87
+  nsurv <- round(rgamma(n = nsite, shape = gam$parameters[1], scale = gam$parameters[2]), 0)
+  nsurv <- ifelse(nsurv > max.nsurv, max.nsurv, nsurv)  
+
+  long <- do.call(rbind, lapply(1:length(nsurv), function(x) data.frame(site = x, surv = seq(1:nsurv[x]))))
+  
+  
+
+  pct.active <- function(x) {rnorm(1, mean.pct.active, sd.pct.active)} 
+
+  active.day <- sapply(1:max(nsurv), pct.active)
+  active.day[active.day < 0] <- 0
+
+  long$no.active <- sapply(1:nrow(long), function(x) rbinom(1, abund[long$site[x]], active.day[long$surv[x]]/100)) 
+
+  long$drum.min <- sapply(1:nrow(long), function(x){
+    a <- long$no.active[x]
+    if(a > 0){
+      d <- sum(sapply(1:a, function(i){
+        p <- rgamma(1, shape = 9, scale = 0.4)
+        p <- ifelse(p < 1, 1, p)
+        return(rbinom(1, 1, 1/p))
+      }))
+    }else{
+      d <- 0
+    }
+    return(d)
+  })
+
+  long$det <- ifelse(long$drum.min > 1, 1, 0) 
+
+  wide <- long %>% select(site, surv, det) %>% spread(surv, value = det) 
+
+  naive.sim <- rowSums(wide[, -1], na.rm = TRUE)
+  naive.sim[naive.sim > 1] <- 1
+
+  return(list(long_data = long, det_data = wide, naive_occ = naive.sim))
+
+}
+
+try1 <- rugr_data_sim(nsite, psi, lam, gam, mean.pct.active, sd.pct.active, max.nsurv) 
+
+lamtry <- 1:10 
+
+iter <- 100 
+
+
+
+sims.lam <- do.call(cbind, lapply(1:length(lamtry), function(x){
+  psi <- 0.5 
+  lam <- lamtry[x]
+  max.nsurv <- 87 
+  mean.pct.active <- mean(c(29,49,31,30))
+  sd.pct.active <-  mean(11,18,20,14)
+  
+  sim <- sapply(1:iter, function(i){
+    t <- rugr_data_sim(nsite, psi, lam, gam, mean.pct.active, sd.pct.active, max.nsurv) 
+    return(mean(t$naive_occ))
+  })
+  
+}))
+
+sims.lam <- data.frame(iter = 1:nrow(sims.lam), sims.lam) 
+
+sims.long <- sims.lam %>% gather(lam, detections, X1:X10)
+
+library(ggplot2) 
+
+ggplot() + geom_boxplot(data = sims.long, aes(x = factor(lam, c("X1", "X2", "X3", "X4", "X5", "X6", "X7", "X8", "X9", "X10")), y = detections)) + xlab("Simulated lambda | occupancy") + ylab("Naive occupancy estimate")
+
+```
+
+
+# Literature Cited 
+
+
+
+
+
+
+
+

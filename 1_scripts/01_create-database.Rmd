@@ -16,6 +16,8 @@ Below are the instructions and code for getting data from wildtrax that was deve
 #remotes::install_github("ABbiodiversity/wildRtrax")
 library(wildRtrax)
 library(tidyverse)
+library(lubridate)
+library(unmarked)
 ```
 
 
@@ -29,7 +31,7 @@ NOTE: If you have not done this yet, first, open a blank R document and add the 
 Then save the file to "1_scripts/functions/login.R", and ensure that it will not be pushed to github by adding the file path (without the quotes) to your .gitignore file (in the main project directory)
 
 ```{r eval=FALSE}
-config <- "login.R"
+config <- "1_scripts/functions/login.R"
 source(config)
 wt_auth()
 ```
@@ -40,16 +42,100 @@ wt_auth()
 projects <- wt_get_download_summary(sensor_id = 'ARU')
 ```
 
-4.  **Download RUGR dataset summary report**
+4.  **Download RUGR dataset summary report** 
+This takes a little while 
 
 ```{r eval=FALSE}
-dat.rugr <- wt_download_report(project_id = 1321, sensor_id = 'ARU', weather_cols = T, report = "summary")
+# Find the project_id for the RUGR project
+rugr_id <- projects[grep("RUGR", projects$project), "project_id"][[1]]
+# project_id = 1321
+
+dat.rugr <- wt_download_report(project_id = rugr_id, sensor_id = 'ARU', weather_cols = T, report = "summary")
+
+saveRDS(dat.rugr, paste0("0_data/raw/dat-rugr_", format(Sys.time(), "%d-%B-%Y"), ".rds")) 
 ```
 
 5.  **Download RUGR task report to check coordinate buffering**
 
 ```{r eval=FALSE}
-task.rugr <- wt_download_report(project_id = 1321, sensor_id = 'ARU', report = "task")
+task.rugr <- wt_download_report(project_id = rugr_id, sensor_id = 'ARU', report = "task")
 table(task.rugr$buffer)
 ```
+
+
+6.  **Format the data for occupancy estimation in unmarked**  
+```{r, eval = FALSE}
+
+# Load the data if not already in the environment
+dat.rugr <- readRDS("0_data/raw/dat-rugr_25-February-2023.rds")
+
+# Call the function to format the data
+source("1_scripts/functions/wt_format_occupancy.R") 
+
+# Filter the data to only the surveys that have been transcribed 
+dat <- dat.rugr %>% filter(status == "Transcribed")
+
+# Run the data through the function 
+occ.data <- wt_format_occupancy(data = dat.rugr, species = 'RUGR')
+
+# Check the distributions of day of year and time of day
+hist(occ.data@obsCovs$doy)
+hist(occ.data@obsCovs$hr)
+``` 
+Because the data come from 2 different time-of-day clusters (nocturnal and diurnal), the detection model will not perform well if we use both clusters in a standard linear modelling format. Therefore, we will use only the diurnal surveys. 
+```{r, eval=FALSE}
+# Reformat the data to only include crepuscular and diurnal surveys (those done after 02:00)
+dat1 <- dat %>%
+    dplyr::filter(species_code=='RUGR') %>%
+    dplyr::select(location, recording_date) %>%
+    mutate(occur=1) %>%
+    right_join(dat %>%
+                 dplyr::select(location, recording_date, observer, method, species_code) %>%
+                 unique(),
+               by=c("location", "recording_date")) %>%
+    mutate(occur = ifelse(is.na(occur), 0, 1),
+           doy = yday(recording_date),
+           hr = as.numeric(hour(recording_date) + minute(recording_date)/60))
+
+dat.day <- dat1 %>% filter(hr > 2)
+
+occ.data <- wt_format_occupancy(data = dat.day, species = 'RUGR')
+
+# Divide day or year by 100 to make the ML estimation easier (and more reliable)
+occ.data@obsCovs$doy <- occ.data@obsCovs$doy/100
+occ.data@obsCovs$doy2 <- (occ.data@obsCovs$doy)^2
+
+# Or, alternatively, standardize all of the detection covariates 
+occ.data.1 <- occ.data
+occ.data.1@obsCovs$doy <- scale(occ.data@obsCovs$doy)
+occ.data.1@obsCovs$doy2 <- scale(occ.data@obsCovs$doy2)
+occ.data.1@obsCovs$hr <- scale(occ.data.1@obsCovs$hr)
+occ.data.1@obsCovs$hr2 <- scale(occ.data.1@obsCovs$hr2)
+
+# Run the basic occupancy model with covariates on detection but assuming constant occupancy
+occ1 <- occu(~ doy + doy2 + hr ~ 1, occ.data) 
+
+occ1.1 <- occu(~ doy + doy2 + hr + hr2 ~ 1, occ.data.1)
+
+backTransform(occ1, type = "state")
+``` 
+
+Plot the effects of day of year and time of day on detection probability to see if it makes sense 
+```{r, eval=FALSE}
+det.doy <- data.frame(doy = seq(1.1, 1.5, 0.01), doy2 = seq(1.1, 1.5, 0.01)^2, hr = mean(occ.data@obsCovs$hr, na.rm = TRUE), hr2 = mean(occ.data@obsCovs$hr2, na.rm = TRUE))
+pred.doy <- predict(occ1, newdata = det.doy, type = "det") 
+
+plot(det.doy$doy, pred.doy$Predicted)
+
+det.hr <- data.frame(doy = mean(occ.data@obsCovs$doy, na.rm = TRUE), doy2 = mean(occ.data@obsCovs$doy2, na.rm = TRUE), hr = seq(5, 8, 0.1))
+
+pred.hr <- predict(occ1, newdata = det.hr, type = "det") 
+
+plot(det.hr$hr, pred.hr$Predicted)
+
+```
+
+
+
+
 

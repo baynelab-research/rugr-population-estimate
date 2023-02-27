@@ -38,8 +38,7 @@ library(knitr)
 # Example Project
 
 **Project description**
-
-Get scared by doggo also cucumerro hide from vacuum cleaner so eat a rug and furry furry hairs everywhere oh no human coming lie on counter don't get off counter lick the other cats chirp at birds. Cats are fats i like to pets them they like to meow back annoy the old grumpy cat, start a fight and then retreat to wash when i lose and i'm going to lap some water out of my master's cup meow. Meowing chowing and wowing. Lay on arms while you're using the keyboard. Immediately regret falling into bathtub just going to dip my paw in your coffee and do a taste test - oh never mind i forgot i don't like coffee - you can have that back now. 
+The Objective of this project is to use estimate Ruffed Grouse (*Bonasa umbellus*) population size in Alberta using data collected with autonomous recording units (ARUs). 
 
 
 
